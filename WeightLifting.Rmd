@@ -1,0 +1,186 @@
+# Predictingn Performance of Weight-lifting Activity
+
+
+
+## Overview
+
+In this assignment, we attempted to predict the manner in which participants performed barbell lifts. The dataset used in this assignment came from  http://groupware.les.inf.puc-rio.br/har. We were tasked with implementing a machine learning algorithm in order to predict the "classe" variable in the dataset. This variable indicates how the participant performed the activity.
+
+We use two techniques to predict the classe variable. The first is a boosting method using the gbm and caret packages, and the second uses random forests using the randomForest package. As we will see, the random forest model was able to maintain a very high out-of-sample accuracy--outperforming the boosting method.
+
+## Data
+
+```{r, echo=FALSE}
+findNAs <- function(x){
+  #Given a data frame, x, return a new dataframe containing only columns from original data frame
+  #with less than half of their values as NA
+  
+  colList = c()
+  for(i in 1:ncol(x)){
+    NAcount = sum(is.na(x[,i]))
+    if(NAcount < (nrow(x)/2)) colList = c(colList, names(x)[i])
+  }
+  
+  new_x = subset(x, select = colList)
+  return(new_x)
+  
+}
+
+findNAs2 <- function(x){
+  #Given a data frame, x, return a new data frame, new_x, that removes columns consisting of all NA values
+  #in oriiginal data frame
+  colList = c()
+  for(i in 1:ncol(x)){
+    NAcount = sum(is.na(x[,i]))
+    if(NAcount < nrow(x)) colList = c(colList, names(x)[i])
+  }
+  new_x = subset(x, select = colList)
+  return(new_x)
+}
+
+makeNumeric <- function(x){
+  #Given a data frame, x, return a new data frame, new_x, with all columns transformed into numeric class.
+  
+  for(i in 1:ncol(x)){
+    if(names(x)[i] == "classe") next
+    else if(!(class(x[,i]) == "numeric")) x[,i] = as.numeric(x[,i])
+  }
+  return(x)
+  
+}
+```
+
+There was some processing needed in order to be able to use the desired algorithms on our data. We wrote a few helper functions in order to help process the data. There were a significant amount of variables for which there were a high proportion of NA values. We removed these variables from consideration. We then converted the remaining variables to a numeric format so that we could perform principal component analysis on them (See Appendix for code).
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(caret)
+library(gbm)
+library(randomForest)
+library(e1071)
+
+train <- read.csv('pml-training.csv')
+test <- read.csv('pml-testing.csv')
+
+source('pml_funcs.R')
+
+##Remove variables with high amount of NAs
+train_new <- findNAs(train)
+
+##Remove variables with insignificant predictive power and reconcile test set to match
+nonvars <- c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+train_new <- train_new[, !(names(train_new) %in% nonvars)]
+test_new <- subset(test, select = names(train_new)[-86])
+
+##Convert remaining variables to numeric class
+train_new <- makeNumeric(train_new)
+test_new <- makeNumeric(test_new)
+
+##Remove variables with all NA values in test set and reconcile train set to match
+test_new <- findNAs2(test_new)
+train_new <- subset(train_new, select = c(names(test_new), 'classe'))
+
+```
+
+## Analysis
+
+We first try a gradient boosting method. We use the train function of the caret package to do this. Within the function call we set the trControl parameter to include 7-fold cross validation in the building of the model. We also pre-process the data using principal component analysis.
+
+Next, we use a random forest approach. For this approach we do not use principal component analysis. We also do not use the train function to conduct cross validation. Instead, we rely solely on our validation set that we manually created in order to estimate our out-of-sample error. We show the confusion matrices for both methods below. The matrices show the predictions on the validation set as the rows and the actual "classe" values from the validation set as columns.
+
+```{r, cache=TRUE}
+##Split training set into a training and validation set.
+set.seed(456)
+tr = createDataPartition(train_new$classe, p=0.8)[[1]]
+train_small = train_new[tr,]
+test_small = train_new[-tr,]
+
+##Gradiant Boosting Model
+gbmMod <- train(classe ~ ., method = 'gbm', preProcess = 'pca', data = train_small, trControl = trainControl(method = 'cv', number = 7), verbose=FALSE)
+confusionMatrix(predict(gbmMod, newdata = test_small), test_small$classe)
+
+#Random FOrest Model
+rfMod <- randomForest(classe ~ ., data = train_small, ntree = 150)
+confusionMatrix(predict(rfMod, newdata=test_small), test_small$classe)
+
+```
+
+## Conclusion
+
+As we can see from the output of the confusion Matrix above, as well as the plot below, the random forest model has a very low error rate (significantly lower than that of the boosting model). Given the performance on our validation set, we would expect our model to perform with near 99% accuracy on out-of-sample data. Since our validation set was not used at all during the creation of our model, the performance on this set gives a good estimate for the out-of-sample error of our model. And, in fact, our model performed with 100% accuracy on the given test dataset used for the "submission" section of this exercise.
+
+```{r, echo=FALSE}
+plot(rfMod, main = 'Error Rate for Random Forest Model')
+```
+
+
+
+## Appendix
+
+**Helper functions for processing of original data:**
+```{r}
+findNAs <- function(x){
+  #Given a data frame, x, returns a new dataframe, new_x, containing only columns from original data frame 
+  #with less than half of their values as NA
+  
+  colList = c()
+  for(i in 1:ncol(x)){
+    NAcount = sum(is.na(x[,i]))
+    if(NAcount < (nrow(x)/2)) colList = c(colList, names(x)[i])
+  }
+  
+  new_x = subset(x, select = colList)
+  return(new_x)
+  
+}
+
+findNAs2 <- function(x){
+  #Given a data frame, x, returns a new data frame, new_x, that removes columns consisting of all NA values
+  #in oriiginal data frame
+  colList = c()
+  for(i in 1:ncol(x)){
+    NAcount = sum(is.na(x[,i]))
+    if(NAcount < nrow(x)) colList = c(colList, names(x)[i])
+  }
+  new_x = subset(x, select = colList)
+  return(new_x)
+}
+
+makeNumeric <- function(x){
+  #Given a data frame, x, returns a new data frame, new_x, with all columns transformed into numeric class.
+  
+  for(i in 1:ncol(x)){
+    if(names(x)[i] == "classe") next
+    else if(!(class(x[,i]) == "numeric")) x[,i] = as.numeric(x[,i])
+  }
+  return(x)
+  
+}
+
+
+```
+
+**Steps for processing original data:**
+```{r}
+train <- read.csv('pml-training.csv')
+test <- read.csv('pml-testing.csv')
+
+source('pml_funcs.R')
+
+##Remove variables with high amount of NAs
+train_new <- findNAs(train)
+
+##Remove variables with insignificant predictive power and reconcile test set to match
+nonvars <- c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+train_new <- train_new[, !(names(train_new) %in% nonvars)]
+test_new <- subset(test, select = names(train_new)[-86])
+
+##Convert remaining variables to numeric class
+train_new <- makeNumeric(train_new)
+test_new <- makeNumeric(test_new)
+
+##Remove variables with all NA values in test set and reconcile train set to match
+test_new <- findNAs2(test_new)
+train_new <- subset(train_new, select = c(names(test_new), 'classe'))
+
+```
